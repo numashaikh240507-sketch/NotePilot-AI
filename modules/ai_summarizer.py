@@ -2,6 +2,8 @@
 import json
 import os
 import re
+
+import streamlit as st
 from groq import Groq
 from dotenv import load_dotenv
 
@@ -10,16 +12,39 @@ load_dotenv()
 MAX_INPUT_CHARACTERS = 18000
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 
-TEXT_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
-AUDIO_MODEL = os.getenv("GROQ_AUDIO_MODEL", "whisper-large-v3-turbo")
+TEXT_MODEL = os.getenv(
+    "GROQ_MODEL",
+    "openai/gpt-oss-20b"
+)
+
+AUDIO_MODEL = os.getenv(
+    "GROQ_AUDIO_MODEL",
+    "whisper-large-v3-turbo"
+)
+
+
+def _get_secret(name, default=None):
+    """Read configuration from environment or Streamlit Secrets."""
+    value = os.getenv(name)
+
+    if value:
+        return value
+
+    try:
+        value = st.secrets.get(name, default)
+    except Exception:
+        value = default
+
+    return value
 
 
 def _get_client():
-    api_key = os.getenv("GROQ_API_KEY")
+    api_key = _get_secret("GROQ_API_KEY")
 
     if not api_key:
         raise ValueError(
-            "Groq API key is missing. Add GROQ_API_KEY to your .env file."
+            "Groq API key is missing. Add GROQ_API_KEY "
+            "to your local .env file or Streamlit Cloud Secrets."
         )
 
     return Groq(api_key=api_key)
@@ -103,13 +128,16 @@ def _extract_json(response):
         response,
         flags=re.IGNORECASE
     )
+
     response = re.sub(r"\s*```$", "", response)
 
     start = response.find("{")
     end = response.rfind("}")
 
     if start == -1 or end == -1:
-        raise ValueError("The AI did not return a valid JSON object.")
+        raise ValueError(
+            "The AI did not return a valid JSON object."
+        )
 
     return response[start:end + 1]
 
@@ -120,15 +148,28 @@ def _safe_list(value):
 
 def _normalise_response(data, title):
     if not isinstance(data, dict):
-        raise ValueError("The AI response has an invalid structure.")
+        raise ValueError(
+            "The AI response has an invalid structure."
+        )
 
-    # Accept alternative field names
     aliases = {
         "key_points": ["keypoints", "key_takeaways"],
-        "important_concepts": ["concepts", "important_topics"],
-        "action_items": ["next_action_items", "tasks"],
-        "roadmap": ["learning_roadmap", "study_roadmap"],
-        "study_questions": ["revision_questions", "questions"]
+        "important_concepts": [
+            "concepts",
+            "important_topics"
+        ],
+        "action_items": [
+            "next_action_items",
+            "tasks"
+        ],
+        "roadmap": [
+            "learning_roadmap",
+            "study_roadmap"
+        ],
+        "study_questions": [
+            "revision_questions",
+            "questions"
+        ]
     }
 
     for expected, alternatives in aliases.items():
@@ -140,7 +181,10 @@ def _normalise_response(data, title):
 
     result = {
         "title": str(data.get("title") or title),
-        "summary": str(data.get("summary") or "Summary could not be generated."),
+        "summary": str(
+            data.get("summary")
+            or "Summary could not be generated."
+        ),
         "key_points": [],
         "important_concepts": [],
         "action_items": [],
@@ -152,17 +196,30 @@ def _normalise_response(data, title):
     for item in _safe_list(data.get("key_points")):
         if isinstance(item, str) and item.strip():
             result["key_points"].append(item.strip())
+
         elif isinstance(item, dict):
-            point = item.get("point") or item.get("text") or item.get("title")
+            point = (
+                item.get("point")
+                or item.get("text")
+                or item.get("title")
+            )
+
             if point:
                 result["key_points"].append(str(point))
 
     # Important concepts
-    for item in _safe_list(data.get("important_concepts")):
+    for item in _safe_list(
+        data.get("important_concepts")
+    ):
         if not isinstance(item, dict):
             continue
 
-        term = item.get("term") or item.get("concept") or item.get("name")
+        term = (
+            item.get("term")
+            or item.get("concept")
+            or item.get("name")
+        )
+
         explanation = (
             item.get("explanation")
             or item.get("exlication")
@@ -178,6 +235,7 @@ def _normalise_response(data, title):
 
     # Action items
     for item in _safe_list(data.get("action_items")):
+
         if isinstance(item, str) and item.strip():
             result["action_items"].append({
                 "task": item.strip(),
@@ -190,20 +248,34 @@ def _normalise_response(data, title):
         if not isinstance(item, dict):
             continue
 
-        task = item.get("task") or item.get("action") or item.get("title")
+        task = (
+            item.get("task")
+            or item.get("action")
+            or item.get("title")
+        )
 
         if not task or not str(task).strip():
             continue
 
         result["action_items"].append({
             "task": str(task),
-            "priority": str(item.get("priority") or "Medium"),
-            "deadline": str(item.get("deadline") or "Not specified"),
-            "basis": str(item.get("basis") or "Suggested next step")
+            "priority": str(
+                item.get("priority") or "Medium"
+            ),
+            "deadline": str(
+                item.get("deadline") or "Not specified"
+            ),
+            "basis": str(
+                item.get("basis") or "Suggested next step"
+            )
         })
 
     # Learning roadmap
-    for index, item in enumerate(_safe_list(data.get("roadmap")), start=1):
+    for index, item in enumerate(
+        _safe_list(data.get("roadmap")),
+        start=1
+    ):
+
         if isinstance(item, str) and item.strip():
             result["roadmap"].append({
                 "step": index,
@@ -216,39 +288,62 @@ def _normalise_response(data, title):
         if not isinstance(item, dict):
             continue
 
-        step_title = item.get("title") or item.get("topic") or item.get("name")
+        step_title = (
+            item.get("title")
+            or item.get("topic")
+            or item.get("name")
+        )
+
         if not step_title:
             continue
 
         result["roadmap"].append({
             "step": item.get("step") or index,
             "title": str(step_title),
-            "description": str(item.get("description") or step_title),
+            "description": str(
+                item.get("description") or step_title
+            ),
             "estimated_time": str(
-                item.get("estimated_time") or item.get("time") or "Not specified"
+                item.get("estimated_time")
+                or item.get("time")
+                or "Not specified"
             )
         })
 
     # Study questions
-    for item in _safe_list(data.get("study_questions")):
+    for item in _safe_list(
+        data.get("study_questions")
+    ):
+
         if isinstance(item, str) and item.strip():
-            result["study_questions"].append(item.strip())
+            result["study_questions"].append(
+                item.strip()
+            )
+
         elif isinstance(item, dict):
-            question = item.get("question") or item.get("text")
+            question = (
+                item.get("question")
+                or item.get("text")
+            )
+
             if question:
-                result["study_questions"].append(str(question))
+                result["study_questions"].append(
+                    str(question)
+                )
 
     return result
 
 
 def _generate(text, title, source_type):
     client = _get_client()
-
     prompt = _build_prompt(text, title, source_type)
 
     try:
         response = client.chat.completions.create(
-            model=TEXT_MODEL,
+            model=_get_secret(
+                "GROQ_MODEL",
+                "openai/gpt-oss-20b"
+            ),
             messages=[
                 {
                     "role": "system",
@@ -270,7 +365,9 @@ def _generate(text, title, source_type):
         raw_response = response.choices[0].message.content
 
         if not raw_response:
-            raise ValueError("Groq returned an empty response.")
+            raise ValueError(
+                "Groq returned an empty response."
+            )
 
         json_text = _extract_json(raw_response)
         parsed = json.loads(json_text)
@@ -287,31 +384,54 @@ def _generate(text, title, source_type):
         client.close()
 
 
-def generate_summary(text, title="Study Material", source_type="Text"):
+def generate_summary(
+    text,
+    title="Study Material",
+    source_type="Text"
+):
     if not text or not text.strip():
-        raise ValueError("No text was provided for analysis.")
+        raise ValueError(
+            "No text was provided for analysis."
+        )
 
     cleaned_text = text.strip()[:MAX_INPUT_CHARACTERS]
 
-    return _generate(cleaned_text, title, source_type)
+    return _generate(
+        cleaned_text,
+        title,
+        source_type
+    )
 
 
-def generate_media_summary(file_path, title="Meeting Recording"):
+def generate_media_summary(
+    file_path,
+    title="Meeting Recording"
+):
     if not os.path.exists(file_path):
-        raise ValueError("The uploaded media file could not be found.")
+        raise ValueError(
+            "The uploaded media file could not be found."
+        )
 
     file_size = os.path.getsize(file_path)
 
     if file_size > MAX_AUDIO_BYTES:
-        raise ValueError("Audio/video file exceeds the 25 MB limit.")
+        raise ValueError(
+            "Audio/video file exceeds the 25 MB limit."
+        )
 
     client = _get_client()
 
     try:
         with open(file_path, "rb") as media_file:
             transcription = client.audio.transcriptions.create(
-                file=(os.path.basename(file_path), media_file.read()),
-                model=AUDIO_MODEL,
+                file=(
+                    os.path.basename(file_path),
+                    media_file.read()
+                ),
+                model=_get_secret(
+                    "GROQ_AUDIO_MODEL",
+                    "whisper-large-v3-turbo"
+                ),
                 response_format="text"
             )
 
@@ -322,13 +442,15 @@ def generate_media_summary(file_path, title="Meeting Recording"):
         )
 
         if not transcript or not transcript.strip():
-            raise ValueError("No speech could be detected in the uploaded file.")
-
-        return generate_summary(
-            transcript,
-            title=title,
-            source_type="Audio/Video Transcript"
-        )
+            raise ValueError(
+                "No speech could be detected in the uploaded file."
+            )
 
     finally:
         client.close()
+
+    return generate_summary(
+        transcript,
+        title=title,
+        source_type="Audio/Video Transcript"
+    )
